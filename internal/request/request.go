@@ -55,14 +55,15 @@ outer:
 			return 0, ErrorRequestInErrorState
 
 		case StateInit:
-			requestLine, readIdx, err := parseRequestLine(currentData)
+			requestLine, n, err := parseRequestLine(currentData)
 			if err != nil {
 				r.state = StateError
 				return 0, err
 			}
-			if readIdx == 0 {
+			if n == 0 {
 				break outer
 			}
+			readIdx += n
 			r.RequestLine = *requestLine
 			r.state = StateHeaders
 
@@ -88,7 +89,6 @@ outer:
 		default:
 			return 0, fmt.Errorf("unknown state: %s", r.state)
 		}
-
 	}
 	return readIdx, nil
 }
@@ -124,19 +124,16 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	buf := make([]byte, 8)
 	bufLen := 0
 	for !request.done() {
-		// If buffer is full, check if we need to grow it
 		if bufLen == len(buf) {
 			readIdx, err := request.parse(buf[:bufLen])
 			if err != nil {
 				return nil, err
 			}
 			if readIdx == 0 {
-				// Need more data but buffer is full, grow it
 				newBuf := make([]byte, len(buf)*2)
 				copy(newBuf, buf)
 				buf = newBuf
 			} else {
-				// We parsed something, shift the buffer
 				copy(buf, buf[readIdx:bufLen])
 				bufLen -= readIdx
 			}

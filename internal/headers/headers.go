@@ -73,13 +73,19 @@ func (h *Headers) Set(name, value string) {
 	h.headers[strings.ToLower(name)] = value
 }
 
+func (h *Headers) ForEach(callback func(name, value string)) {
+	for name, value := range h.headers {
+		callback(name, value)
+	}
+}
+
 func (h *Headers) Parse(data []byte) (int, bool, error) {
 	read := 0
 	done := false
 	for {
 		idx := bytes.Index(data[read:], SEPARATOR)
 		if idx == -1 {
-			return 0, false, nil
+			return read, false, nil
 		}
 		if idx == 0 {
 			done = true
