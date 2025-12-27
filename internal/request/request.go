@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"webserver/internal/headers"
 )
 
 type parserState string
@@ -17,6 +18,7 @@ type RequestLine struct {
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     *headers.Headers
 	state       parserState
 }
 
@@ -26,14 +28,16 @@ var ErrorUnspportedHttpVersion = fmt.Errorf("unsupported HTTP version")
 var ErrorRequestInErrorState = fmt.Errorf("request in error state")
 
 const (
-	StateInit  parserState = "init"
-	StateDone  parserState = "done"
-	StateError parserState = "error"
+	StateInit    parserState = "init"
+	StateHeaders parserState = "headers"
+	StateDone    parserState = "done"
+	StateError   parserState = "error"
 )
 
 func newRequest() *Request {
 	return &Request{
-		state: StateInit,
+		state:   StateInit,
+		Headers: headers.NewHeaders(),
 	}
 }
 
@@ -45,11 +49,13 @@ func (r *Request) parse(data []byte) (int, error) {
 	readIdx := 0
 outer:
 	for {
+		currentData := data[readIdx:]
 		switch r.state {
 		case StateError:
 			return 0, ErrorRequestInErrorState
+
 		case StateInit:
-			requestLine, readIdx, err := parseRequestLine(data)
+			requestLine, readIdx, err := parseRequestLine(currentData)
 			if err != nil {
 				r.state = StateError
 				return 0, err
@@ -58,8 +64,27 @@ outer:
 				break outer
 			}
 			r.RequestLine = *requestLine
-			r.state = StateDone
+			r.state = StateHeaders
+
+		case StateHeaders:
+			n, done, err := r.Headers.Parse(currentData)
+			if err != nil {
+				r.state = StateError
+				return 0, err
+			}
+			readIdx += n
+
+			if n == 0 {
+				break outer
+			}
+			if done {
+				r.state = StateDone
+				break outer
+			}
+
+		case StateDone:
 			break outer
+
 		default:
 			return 0, fmt.Errorf("unknown state: %s", r.state)
 		}
@@ -120,6 +145,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		n, err := reader.Read(buf[bufLen:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				if request.state == StateHeaders {
+					return nil, fmt.Errorf("malformed header")
+				}
 				request.state = StateDone
 				break
 			}

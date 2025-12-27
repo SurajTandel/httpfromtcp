@@ -3,18 +3,17 @@ package headers
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
 
-type Headers map[string]string
+type Headers struct {
+	headers map[string]string
+}
 
 var SEPARATOR = []byte("\r\n")
 var ErrorMalformedHeader = fmt.Errorf("malformed header")
 var ErrorMalformedHeaderKey = fmt.Errorf("malformed header key")
 var ErrorMalformedHeaderValue = fmt.Errorf("malformed header value")
-
-func NewHeaders() Headers {
-	return map[string]string{}
-}
 
 func parseHeader(data []byte) (string, string, error) {
 	parts := bytes.SplitN(data, []byte(":"), 2)
@@ -24,20 +23,63 @@ func parseHeader(data []byte) (string, string, error) {
 	name := parts[0]
 	value := bytes.TrimSpace(parts[1])
 
+	// Check for trailing space before colon (invalid per HTTP spec)
 	if bytes.HasSuffix(name, []byte(" ")) {
+		return "", "", ErrorMalformedHeaderKey
+	}
+
+	// Trim leading spaces and validate
+	name = bytes.TrimSpace(name)
+	if len(name) == 0 {
 		return "", "", ErrorMalformedHeaderKey
 	}
 
 	return string(name), string(value), nil
 }
 
-func (h Headers) Parse(data []byte) (int, bool, error) {
+var validTokenChars = map[byte]bool{
+	'!': true, '#': true, '$': true, '%': true, '&': true,
+	'\'': true, '*': true, '+': true, '-': true, '.': true,
+	'^': true, '_': true, '`': true, '|': true, '~': true,
+}
+
+func isToken(str []byte) bool {
+	if len(str) == 0 {
+		return false
+	}
+	for _, c := range str {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || validTokenChars[c]) {
+			return false
+		}
+	}
+	return true
+}
+
+func NewHeaders() *Headers {
+	return &Headers{
+		headers: map[string]string{},
+	}
+}
+
+func (h *Headers) Get(name string) string {
+	return h.headers[strings.ToLower(name)]
+}
+
+func (h *Headers) Set(name, value string) {
+	if _, exists := h.headers[strings.ToLower(name)]; exists {
+		h.headers[strings.ToLower(name)] += "," + value
+		return
+	}
+	h.headers[strings.ToLower(name)] = value
+}
+
+func (h *Headers) Parse(data []byte) (int, bool, error) {
 	read := 0
 	done := false
 	for {
 		idx := bytes.Index(data[read:], SEPARATOR)
 		if idx == -1 {
-			return 0, false, ErrorMalformedHeader
+			return 0, false, nil
 		}
 		if idx == 0 {
 			done = true
@@ -49,7 +91,10 @@ func (h Headers) Parse(data []byte) (int, bool, error) {
 		if err != nil {
 			return 0, false, err
 		}
-		h[name] = value
+		if !isToken([]byte(name)) {
+			return 0, false, ErrorMalformedHeaderKey
+		}
+		h.Set(name, value)
 		read += idx + len(SEPARATOR)
 	}
 	return read, done, nil
