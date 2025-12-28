@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"webserver/internal/headers"
 )
 
@@ -19,7 +20,20 @@ type RequestLine struct {
 type Request struct {
 	RequestLine RequestLine
 	Headers     *headers.Headers
+	Body        []byte
 	state       parserState
+}
+
+func getIntHeader(headers *headers.Headers, name string, defaultValue int) int {
+	value, exists := headers.Get(name)
+	if !exists {
+		return defaultValue
+	}
+	valueInt, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return valueInt
 }
 
 var SEPARATOR = []byte("\r\n")
@@ -30,6 +44,7 @@ var ErrorRequestInErrorState = fmt.Errorf("request in error state")
 const (
 	StateInit    parserState = "init"
 	StateHeaders parserState = "headers"
+	StateBody    parserState = "body"
 	StateDone    parserState = "done"
 	StateError   parserState = "error"
 )
@@ -50,6 +65,9 @@ func (r *Request) parse(data []byte) (int, error) {
 outer:
 	for {
 		currentData := data[readIdx:]
+		if len(currentData) == 0 {
+			break outer
+		}
 		switch r.state {
 		case StateError:
 			return 0, ErrorRequestInErrorState
@@ -79,6 +97,21 @@ outer:
 				break outer
 			}
 			if done {
+				r.state = StateBody
+				break outer
+			}
+
+		case StateBody:
+			contentLength := getIntHeader(r.Headers, "Content-Length", 0)
+			if contentLength == 0 {
+				r.state = StateDone
+				break outer
+			}
+			remaining := min(contentLength-len(r.Body), len(currentData))
+			r.Body = append(r.Body, currentData[:remaining]...)
+			readIdx += remaining
+
+			if len(r.Body) == contentLength {
 				r.state = StateDone
 				break outer
 			}
@@ -144,6 +177,12 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			if errors.Is(err, io.EOF) {
 				if request.state == StateHeaders {
 					return nil, fmt.Errorf("malformed header")
+				}
+				if request.state == StateBody {
+					contentLength := getIntHeader(request.Headers, "Content-Length", 0)
+					if len(request.Body) < contentLength {
+						return nil, fmt.Errorf("body shorter than Content-Length: got %d, expected %d", len(request.Body), contentLength)
+					}
 				}
 				request.state = StateDone
 				break
