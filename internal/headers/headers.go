@@ -74,6 +74,10 @@ func (h *Headers) Set(name, value string) {
 	h.headers[strings.ToLower(name)] = value
 }
 
+func (h *Headers) Replace(name, value string) {
+	h.headers[strings.ToLower(name)] = value
+}
+
 func (h *Headers) ForEach(callback func(name, value string)) {
 	for name, value := range h.headers {
 		callback(name, value)

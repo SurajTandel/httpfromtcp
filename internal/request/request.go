@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
 	"webserver/internal/headers"
 )
 
@@ -65,9 +66,6 @@ func (r *Request) parse(data []byte) (int, error) {
 outer:
 	for {
 		currentData := data[readIdx:]
-		if len(currentData) == 0 {
-			break outer
-		}
 		switch r.state {
 		case StateError:
 			return 0, ErrorRequestInErrorState
@@ -98,7 +96,6 @@ outer:
 			}
 			if done {
 				r.state = StateBody
-				break outer
 			}
 
 		case StateBody:
@@ -121,6 +118,11 @@ outer:
 
 		default:
 			return 0, fmt.Errorf("unknown state: %s", r.state)
+		}
+
+		// No more data to process
+		if len(currentData) == 0 {
+			break outer
 		}
 	}
 	return readIdx, nil
@@ -158,18 +160,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	bufLen := 0
 	for !request.done() {
 		if bufLen == len(buf) {
-			readIdx, err := request.parse(buf[:bufLen])
-			if err != nil {
-				return nil, err
-			}
-			if readIdx == 0 {
-				newBuf := make([]byte, len(buf)*2)
-				copy(newBuf, buf)
-				buf = newBuf
-			} else {
-				copy(buf, buf[readIdx:bufLen])
-				bufLen -= readIdx
-			}
+			newBuf := make([]byte, len(buf)*2)
+			copy(newBuf, buf)
+			buf = newBuf
 		}
 
 		n, err := reader.Read(buf[bufLen:])
