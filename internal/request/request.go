@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-
 	"webserver/internal/headers"
 )
 
@@ -156,7 +155,7 @@ func parseRequestLine(line []byte) (*RequestLine, int, error) {
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	request := newRequest()
 
-	buf := make([]byte, 8)
+	buf := make([]byte, 1024)
 	bufLen := 0
 	for !request.done() {
 		if bufLen == len(buf) {

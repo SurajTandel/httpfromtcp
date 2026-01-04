@@ -1,11 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
+	"webserver/internal/headers"
 	"webserver/internal/request"
 	"webserver/internal/response"
 	"webserver/internal/server"
@@ -61,6 +66,56 @@ func main() {
 		case "/myproblem":
 			body = respond500()
 			statusCode = response.StatusInternalServerError
+		case "/video":
+
+			f, err := os.ReadFile("assets/vim.mp4")
+			if err != nil {
+				body = respond500()
+				statusCode = response.StatusInternalServerError
+			} else {
+				h.Replace("Content-Type", "video/mp4")
+				h.Replace("Content-Length", strconv.Itoa(len(f)))
+
+				w.WriteStatusLine(response.StatusOK)
+				w.WriteHeaders(h)
+				w.WriteBody(f)
+				return
+			}
+		default:
+			if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin/") {
+				target := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin/")
+				resp, err := http.Get("https://httpbin.org/" + target)
+				if err != nil {
+					body = respond500()
+					statusCode = response.StatusInternalServerError
+				} else {
+					w.WriteStatusLine(response.StatusOK)
+					h.Delete("Content-Length")
+					h.Set("Transfer-Encoding", "chunked")
+					h.Replace("Content-Type", "text/plain")
+					h.Set("Trailer", "X-Content-SHA256")
+					h.Set("Trailer", "X-Content-Length")
+					w.WriteHeaders(h)
+
+					fullBody := []byte{}
+					for {
+						data := make([]byte, 32)
+						n, err := resp.Body.Read(data)
+						if err != nil {
+							break
+						}
+						fullBody = append(fullBody, data[:n]...)
+						w.WriteChunkedBody(data[:n])
+					}
+					w.WriteChunkedBodyDone()
+					trailers := headers.NewHeaders()
+					trailers.Set("X-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(fullBody)))
+					trailers.Set("X-Content-Length", strconv.Itoa(len(fullBody)))
+					w.WriteTrailers(trailers)
+
+					return
+				}
+			}
 		}
 		h.Replace("Content-Length", strconv.Itoa(len(body)))
 		h.Replace("Content-Type", "text/html")
